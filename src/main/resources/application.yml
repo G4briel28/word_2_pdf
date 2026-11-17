@@ -1,0 +1,90 @@
+# Configuración del microservicio word2pdf.
+# Todos los secretos se inyectan por variables de entorno; no hay valores sensibles en este archivo.
+
+spring:
+  application:
+    name: word2pdf
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${APP_MAX_INPUT_SIZE:20MB}
+      max-request-size: ${APP_MAX_INPUT_SIZE:20MB}
+      # Igual al máximo: los archivos multipart se mantienen en memoria y NO se escriben en disco temporal.
+      file-size-threshold: ${APP_MAX_INPUT_SIZE:20MB}
+
+server:
+  port: 8080
+  shutdown: graceful
+  error:
+    include-stacktrace: never
+    include-message: never
+  tomcat:
+    # Permite leer/descartar cuerpos grandes para poder responder 413 limpio.
+    max-swallow-size: 32MB
+    connection-timeout: 20s
+    # Hilos de petición acotados: limita la memoria usada por cuerpos en tránsito
+    # (cada petición puede retener hasta max-input-size + el PDF resultante).
+    threads:
+      max: ${APP_HTTP_THREADS:32}
+    accept-count: 100
+
+onlyoffice:
+  # URL interna (red privada Docker). Nunca exponer ONLYOFFICE públicamente.
+  base-url: ${ONLYOFFICE_URL:http://localhost:8081}
+  connect-timeout: ${ONLYOFFICE_CONNECT_TIMEOUT:5s}
+  conversion-timeout: ${ONLYOFFICE_CONVERSION_TIMEOUT:120s}
+  health-timeout: 3s
+  jwt:
+    enabled: ${ONLYOFFICE_JWT_ENABLED:true}
+    secret: ${ONLYOFFICE_JWT_SECRET:}
+    # FORM_PART (parte multipart "token") o HEADER (Authorization: Bearer)
+    transport: ${ONLYOFFICE_JWT_TRANSPORT:FORM_PART}
+    token-ttl: 5m
+
+app:
+  conversion:
+    max-input-size: ${APP_MAX_INPUT_SIZE:20MB}
+    max-output-size: ${APP_MAX_OUTPUT_SIZE:200MB}
+    max-concurrent: ${APP_MAX_CONCURRENT:4}
+    queue-timeout: ${APP_QUEUE_TIMEOUT:30s}
+    docx:
+      max-entries: 5000
+      max-uncompressed-size: ${APP_DOCX_MAX_UNCOMPRESSED:300MB}
+      max-compression-ratio: 200
+    fidelity:
+      enabled: ${APP_FIDELITY_ENABLED:true}
+      page-size-tolerance-points: 2.0
+      fail-on-page-size-mismatch: ${APP_FIDELITY_FAIL_ON_PAGE_SIZE:false}
+      fail-on-font-substitution: ${APP_FIDELITY_FAIL_ON_FONTS:false}
+  security:
+    api-key-enabled: ${APP_API_KEY_ENABLED:true}
+    header-name: X-API-Key
+    # Lista separada por comas. Ej.: APP_API_KEYS=clave1,clave2
+    api-keys: ${APP_API_KEYS:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,onlyoffice
+        liveness:
+          include: livenessState
+  health:
+    defaults:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    pe.saeta.word2pdf: INFO
+    # Evita que librerías de terceros vuelquen detalles de peticiones.
+    org.apache.pdfbox: WARN
+  # Logging estructurado: definir LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs (o logstash) en producción.

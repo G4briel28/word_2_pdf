@@ -1,0 +1,107 @@
+# word2pdf + ONLYOFFICE Docs Community 10.0.0
+#
+#   1) Cree .env a partir de .env.example (scripts/generate-env.ps1 o scripts/generate-env.sh)
+#   2) docker compose up -d --build
+#   3) curl http://127.0.0.1:8080/actuator/health/readiness
+#
+# ONLYOFFICE NO publica puertos: solo es accesible desde la red interna "backend" (sin salida a Internet).
+
+name: word2pdf
+
+services:
+  onlyoffice:
+    image: onlyoffice/documentserver:10.0.0
+    restart: unless-stopped
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?Defina ONLYOFFICE_JWT_SECRET en .env}
+      JWT_HEADER: Authorization
+      JWT_IN_BODY: "false"
+      # Regenera el catálogo de fuentes en cada arranque (incluye las montadas en /usr/share/fonts/truetype/custom).
+      GENERATE_FONTS: "true"
+      WOPI_ENABLED: "false"
+      ALLOW_PRIVATE_IP_ADDRESS: "false"
+      ALLOW_META_IP_ADDRESS: "false"
+      DS_LOG_LEVEL: ${ONLYOFFICE_LOG_LEVEL:-WARN}
+    volumes:
+      - onlyoffice_logs:/var/log/onlyoffice
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_lib:/var/lib/onlyoffice
+      # Fuentes adicionales (TTF/OTF/TTC) con licencia que permita su uso en servidor.
+      - ${FONTS_DIR:-./fonts}:/usr/share/fonts/truetype/custom:ro
+      # Retención corta de la caché de archivos (ver README, sección "Almacenamiento temporal en ONLYOFFICE").
+      - ./onlyoffice/local-production-linux.json:/etc/onlyoffice/documentserver/local-production-linux.json:ro
+    # Opción de mayor confidencialidad (NO verificada aún en este proyecto): caché de archivos en RAM.
+    # tmpfs:
+    #   - /var/lib/onlyoffice/documentserver/App_Data/cache/files:size=1g,mode=1777
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/healthcheck | grep -q true"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: "${ONLYOFFICE_CPUS:-2}"
+          memory: ${ONLYOFFICE_MEMORY:-4g}
+        reservations:
+          memory: 2g
+
+  word2pdf:
+    build: .
+    image: word2pdf:1.0.0
+    restart: unless-stopped
+    environment:
+      ONLYOFFICE_URL: http://onlyoffice
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?Defina ONLYOFFICE_JWT_SECRET en .env}
+      ONLYOFFICE_CONVERSION_TIMEOUT: ${ONLYOFFICE_CONVERSION_TIMEOUT:-120s}
+      APP_API_KEY_ENABLED: ${APP_API_KEY_ENABLED:-true}
+      APP_API_KEYS: ${APP_API_KEYS:?Defina APP_API_KEYS en .env}
+      APP_MAX_CONCURRENT: ${APP_MAX_CONCURRENT:-4}
+      APP_MAX_INPUT_SIZE: ${APP_MAX_INPUT_SIZE:-20MB}
+      APP_QUEUE_TIMEOUT: ${APP_QUEUE_TIMEOUT:-30s}
+      APP_FIDELITY_FAIL_ON_FONTS: ${APP_FIDELITY_FAIL_ON_FONTS:-false}
+      APP_FIDELITY_FAIL_ON_PAGE_SIZE: ${APP_FIDELITY_FAIL_ON_PAGE_SIZE:-false}
+      # Logs JSON (Elastic Common Schema) para producción.
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
+      JAVA_OPTS: "-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError -Djava.awt.headless=true -Djava.io.tmpdir=/tmp"
+    ports:
+      # Por defecto solo en localhost. En un servidor, publique detrás de un proxy inverso con TLS.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080"
+    depends_on:
+      onlyoffice:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "${APP_CPUS:-1.5}"
+          memory: ${APP_MEMORY:-1g}
+
+networks:
+  backend:
+    internal: true
+  frontend: {}
+
+volumes:
+  onlyoffice_logs:
+  onlyoffice_data:
+  onlyoffice_lib:

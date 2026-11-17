@@ -1,0 +1,13 @@
+target/
+.git/
+.idea/
+.vscode/
+*.iml
+.env
+fonts/
+samples/
+scripts/
+out/
+reports/
+onlyoffice/
+*.md

@@ -1,0 +1,10 @@
+{
+  "services": {
+    "CoAuthoring": {
+      "expire": {
+        "files": 600,
+        "filesCron": "0 */5 * * * *"
+      }
+    }
+  }
+}

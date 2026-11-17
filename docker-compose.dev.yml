@@ -1,0 +1,16 @@
+# SOLO DESARROLLO LOCAL: publica ONLYOFFICE en 127.0.0.1:8081 para ejecutar el servicio Java fuera de Docker
+# (./mvnw spring-boot:run). No usar en servidores: en producción ONLYOFFICE no debe publicar puertos.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d onlyoffice
+#
+# La red "backend" es interna (sin publicación de puertos), por eso se añade una red adicional solo para desarrollo.
+services:
+  onlyoffice:
+    ports:
+      - "127.0.0.1:8081:80"
+    networks:
+      - backend
+      - devnet
+
+networks:
+  devnet: {}
