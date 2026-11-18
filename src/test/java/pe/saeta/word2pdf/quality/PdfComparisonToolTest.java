@@ -37,6 +37,19 @@ class PdfComparisonToolTest {
     }
 
     @Test
+    void matchesLinesWhenCandidateIsEmittedWordByWord() throws Exception {
+        // Word emite líneas completas; ONLYOFFICE (texto justificado) emite palabra a palabra sin espacios.
+        byte[] reference = TestPdfs.lines(LINES, 100, 30);
+        byte[] candidate = TestPdfs.wordByWordLines(LINES, 100, 30);
+        ComparisonReport report = PdfComparisonTool.compare(reference, candidate, PdfComparisonTool.Options.defaults());
+
+        assertThat(report.textShift().matchedLines()).isEqualTo(LINES.size());
+        assertThat(report.textShift().unmatchedReference()).isZero();
+        assertThat(report.textShift().maxAbsShiftPt()).isZero();
+        assertThat(report.anchors()).hasSize(2).allSatisfy(a -> assertThat(a.dyPt()).isZero());
+    }
+
+    @Test
     void detectsShiftedParagraphsAndSignatures() throws Exception {
         byte[] reference = TestPdfs.lines(LINES, 100, 30);
         byte[] shifted = TestPdfs.lines(LINES, 124, 30);

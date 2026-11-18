@@ -36,7 +36,7 @@ starters `spring-boot-starter-webmvc` / `-webmvc-test`, Testcontainers 2.x (`tes
 ## Comandos
 
 ```powershell
-.\mvnw.cmd verify                      # 112 pruebas sin Docker (ONLYOFFICE simulado: FakeOnlyOfficeServer)
+.\mvnw.cmd verify                      # 113 pruebas sin Docker (ONLYOFFICE simulado: FakeOnlyOfficeServer)
 .\mvnw.cmd -Pintegration verify        # + RealOnlyOfficeConversionIT con Testcontainers (requiere Docker)
 scripts\generate-env.ps1               # crea .env con secretos (no versionado)
 docker compose up -d --build           # servicio en 127.0.0.1:8080, ONLYOFFICE en red interna
@@ -52,29 +52,29 @@ Los DOCX de prueba se generan con `src/test/java/.../support/SampleDocxGenerator
 
 ## Estado al 2026-11-17
 
-Hecho y verificado en una PC **sin Docker**:
-- Compilación y `mvnw verify`: 112 pruebas, 0 fallos.
-- Prueba de humo del JAR (arranque, health, 401, 422, 503, `/inspect`, logs sin contenido).
-- CLI `PdfComparisonTool` vía `PropertiesLauncher`.
+Verificado **con Docker** (Engine 29.9.2). Detalle en la tabla "Estado de verificación" del README:
+- `mvnw verify`: 113 pruebas, 0 fallos. `-Pintegration verify`: además, 6 pruebas reales con ONLYOFFICE 10.0.0, 0 fallos.
+- El transporte JWT `FORM_PART` funciona con 10.0.0 (Testcontainers y Compose). `HEADER` no se ha probado contra el servidor real.
+- Imagen Docker, e2e con Compose, contenedor `read_only` y logs sin contenido: correctos.
+- Caché: cada conversión deja `origin.docx` + `output.pdf` en `cache/files/data/conv_<id>/`. La retención de
+  `local-production-linux.json` **no es fiable**, así que `docker-compose.yml` monta esa ruta como **`tmpfs`** (verificado).
+- Fuentes: la imagen no tiene `fc-list`. Trae Calibri y Cambria, pero **no Aptos**. Las fuentes montadas en `fonts/`
+  se registran al reiniciar y se incrustan en el PDF.
+- Fidelidad frente a Word con 1 pagaré real: 4 = 4 páginas, 149 de 151 líneas coinciden, desplazamiento máximo 0,1 pt.
+- Arreglos hechos: `FakeOnlyOfficeServer` (medición de concurrencia que hacía fallar `OverloadApiTest` de forma
+  intermitente) y `PdfComparisonTool` (ahora empareja líneas completas; antes, fragmentos de texto).
+- La automatización COM de Word se cuelga en esta PC: el usuario exporta los PDF de referencia a mano
+  (Archivo → Exportar → Crear documento PDF/XPS).
 
-## PENDIENTE (requiere Docker; hacerlo en este orden)
+## PENDIENTE
 
-1. **Integración real:** `.\mvnw.cmd -Pintegration verify`. Revisar los PDF en `target/it-output/` y abrirlos para inspección visual.
-   - Si falla con error **-7 o -8**: el transporte JWT por parte multipart `token` (`FORM_PART`) no es el que acepta 10.0.0.
-     Probar `onlyoffice.jwt.transport=HEADER` (`ONLYOFFICE_JWT_TRANSPORT=HEADER`). Ver `OnlyOfficeClient.buildRequest`.
-     Documentar en el README, sección "Integración con la API de ONLYOFFICE", qué transporte funcionó.
-   - Si la respuesta no es binaria o difiere de lo documentado, investigar y documentar.
-2. **Docker Compose + e2e:** `scripts\generate-env.ps1` y luego `scripts\e2e.ps1`. Verificar que la imagen `Dockerfile` se construye y que el contenedor `read_only` arranca bien.
-3. **Caché temporal de ONLYOFFICE:** comprobar que se carga `onlyoffice/local-production-linux.json` (retención de 600 s)
-   y qué rutas usa `/converter/from-file`:
-   `docker compose exec onlyoffice sh -c 'find /var/lib/onlyoffice/documentserver/App_Data/cache/files -type f -mmin -15'`.
-   Evaluar la opción `tmpfs` comentada en `docker-compose.yml`. Actualizar el README, sección "Almacenamiento temporal".
-4. **Fuentes:** `scripts\check-fonts.ps1 -Docx samples\contrato-ejemplo.docx`. Confirmar si existe `fc-list` en la imagen
-   y si las fuentes montadas en `fonts/` aparecen tras reiniciar.
-5. **Fidelidad con contratos reales:** exportar a PDF desde Word algunos contratos reales y compararlos con
-   `scripts\compare-pdf.ps1`. Calibrar umbrales (`--pixel-threshold`, `--line-tolerance`) y revisar falsos positivos de
+1. **Fidelidad con más contratos reales:** comparar 5-10 contratos variados con `scripts\compare-pdf.ps1`
+   (los archivos van en `archivos de prueba/`, ignorada por git). Después, calibrar `--pixel-threshold`: con un 2 %,
+   el pagaré se marcó por una sola diferencia de salto de línea. Revisar también falsos positivos de
    `FONT_SUBSTITUTION_SUSPECTED`. Los contratos reales NO deben subirse al repositorio.
-6. Al terminar: actualizar la tabla "Estado de verificación" del README y esta sección.
+2. Si los contratos usan **Aptos**, conseguirla con licencia y montarla en `fonts/`.
+3. Opcional: probar `ONLYOFFICE_JWT_TRANSPORT=HEADER` contra el servidor real. Valorar `tmpfs` también para `/tmp` de
+   ONLYOFFICE (requiere `exec`, porque `/tmp/.cache` carga módulos nativos).
 
 Mejoras opcionales, no pedidas aún: TLS mediante proxy inverso, endpoint Prometheus, informe de licencias con
 `license-maven-plugin`, CI en GitHub Actions (`mvnw verify` sin Docker).

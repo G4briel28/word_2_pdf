@@ -224,21 +224,49 @@ public final class PdfComparisonTool {
     record Line(int page, double x, double y, String text, String key) {
     }
 
+    /**
+     * Extrae líneas visuales completas. {@code writeString} se invoca por fragmento (Word suele emitir la línea entera;
+     * ONLYOFFICE, en texto justificado sin glifos de espacio, la parte en palabras), así que se acumulan los
+     * fragmentos hasta el separador de línea. La clave de comparación ignora todos los espacios para que el
+     * emparejamiento no dependa de cómo cada generador codifica el espaciado.
+     */
     static List<Line> extractLines(PDDocument doc) throws IOException {
         List<Line> lines = new ArrayList<>();
         PDFTextStripper stripper = new PDFTextStripper() {
+            private final StringBuilder current = new StringBuilder();
+            private TextPosition first;
+
             @Override
-            protected void writeString(String text, List<TextPosition> positions) throws IOException {
-                if (positions.isEmpty()) {
+            protected void writeString(String text, List<TextPosition> positions) {
+                if (positions.isEmpty() || text.isBlank()) {
                     return;
                 }
-                String normalized = text.replaceAll("\\s+", " ").trim();
-                if (normalized.isEmpty()) {
-                    return;
+                if (first == null) {
+                    first = positions.get(0);
+                } else {
+                    current.append(' ');
                 }
-                TextPosition first = positions.get(0);
-                lines.add(new Line(getCurrentPageNo(), first.getXDirAdj(), first.getYDirAdj(), normalized,
-                        normalized.toLowerCase(Locale.ROOT)));
+                current.append(text);
+            }
+
+            @Override
+            protected void writeLineSeparator() {
+                flush();
+            }
+
+            @Override
+            protected void writePageEnd() {
+                flush();
+            }
+
+            private void flush() {
+                String normalized = current.toString().replaceAll("\\s+", " ").trim();
+                if (first != null && !normalized.isEmpty()) {
+                    lines.add(new Line(getCurrentPageNo(), first.getXDirAdj(), first.getYDirAdj(), normalized,
+                            normalized.replaceAll("\\s+", "").toLowerCase(Locale.ROOT)));
+                }
+                current.setLength(0);
+                first = null;
             }
         };
         stripper.setSortByPosition(true);

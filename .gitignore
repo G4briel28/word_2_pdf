@@ -29,3 +29,6 @@ fonts/*
 # SO
 .DS_Store
 Thumbs.db
+
+# Contratos reales y resultados de comparación para QA local: NUNCA versionar
+archivos de prueba/

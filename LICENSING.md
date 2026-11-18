@@ -41,7 +41,7 @@ Estos términos son objeto de debate público. La FSF y Nextcloud discuten si un
 
 ### Fuentes incluidas en la imagen de ONLYOFFICE
 
-El Dockerfile oficial instala `ttf-mscorefonts-installer`, aceptando el EULA de las "Core fonts for the Web" de Microsoft (Arial, Times New Roman, Courier New, Verdana, Georgia, etc.). Esto ocurre dentro de la imagen de terceros, no en este repositorio. Las fuentes de Office (Calibri, Cambria, Aptos…) **no** están incluidas y no deben redistribuirse sin licencia. Ver [fonts/README.md](fonts/README.md).
+El Dockerfile oficial instala `ttf-mscorefonts-installer`, aceptando el EULA de las "Core fonts for the Web" de Microsoft (Arial, Times New Roman, Courier New, Verdana, Georgia, etc.). Esto ocurre dentro de la imagen de terceros, no en este repositorio. Además, se comprobó el 2026-11-17 que la imagen `10.0.0` trae **Calibri y Cambria** en `/usr/share/fonts/truetype/msttcorefonts/`, puestas ahí por el fabricante de la imagen. Conviene que el área legal confirme si su licencia cubre este uso en servidor. Aptos **no** está incluida. Este repositorio no incluye ni redistribuye fuentes de Office, y no deben añadirse sin licencia. Ver [fonts/README.md](fonts/README.md).
 
 ### Qué requiere revisión legal antes del despliegue comercial
 

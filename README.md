@@ -259,7 +259,7 @@ También puede ejecutar el flujo completo automatizado: `scripts\e2e.ps1` o `./s
 ./mvnw verify                 # Windows: .\mvnw.cmd verify
 ```
 
-Ejecuta **112 pruebas** sin Docker (unitarias y de integración de la API con un ONLYOFFICE **simulado**):
+Ejecuta **113 pruebas** sin Docker (unitarias y de integración de la API con un ONLYOFFICE **simulado**):
 
 | Requisito | Pruebas |
 |---|---|
@@ -308,13 +308,17 @@ scripts\check-fonts.ps1 -Docx ruta\contrato.docx
 ./scripts/check-fonts.sh ruta/contrato.docx      # requiere jq
 ```
 
-El script lista las fuentes del contenedor (con `fc-list` de Fontconfig si está disponible, o un inventario de
-archivos si no) y marca como **[AUSENTE]** las fuentes del DOCX que ONLYOFFICE no tiene. Detalles y advertencias de
-licencia en [fonts/README.md](fonts/README.md).
+El script lista las fuentes del contenedor y marca como **[AUSENTE]** las fuentes del DOCX que ONLYOFFICE no tiene.
+La imagen 10.0.0 **no incluye `fc-list`**, así que el script usa un inventario de archivos de `/usr/share/fonts` y
+`core-fonts`. Detalles y advertencias de licencia en [fonts/README.md](fonts/README.md).
 
-La imagen oficial de ONLYOFFICE ya incluye las "Core fonts" de Microsoft (Arial, Times New Roman, Courier New,
-Verdana, Georgia…), pero **no** Calibri, Cambria ni Aptos, que son las predeterminadas en Word moderno. Estas
-son la causa más habitual de diferencias de paginación.
+Fuentes que trae la imagen `onlyoffice/documentserver:10.0.0` (comprobado el 2026-11-17, 244 archivos):
+
+- En `/usr/share/fonts/truetype/msttcorefonts/`: Arial, Times New Roman, Courier New, Verdana, Georgia, etc., y
+  también **Calibri y Cambria**.
+- En `core-fonts/crosextra/`: Carlito y Caladea, equivalentes métricos de Calibri y Cambria.
+- **No incluye Aptos**, la fuente predeterminada de Word 365 desde 2023. Si los contratos usan Aptos, móntela en
+  `fonts/`. Es la causa más probable de diferencias de paginación con documentos recientes.
 
 ## 10. Identificar errores de conversión
 
@@ -434,20 +438,31 @@ API keys y el secreto JWT periódicamente. Cambiar `ONLYOFFICE_JWT_SECRET` exige
 - **Retención por defecto** (según `default.json` del servidor ONLYOFFICE): `services.CoAuthoring.expire.files = 86400`
   segundos (24 h), con limpieza periódica `expire.filesCron = "00 00 */1 * * *"` (cada hora). Además, el contenedor
   ejecuta `documentserver-flush-cache` al arrancar.
-- **Configuración de este proyecto:** [onlyoffice/local-production-linux.json](onlyoffice/local-production-linux.json)
-  reduce la retención a **600 s** y la limpieza a **cada 5 minutos**. Se monta como capa de configuración adicional
-  de node-config, que ONLYOFFICE usa para su configuración.
+- **Configuración de retención:** [onlyoffice/local-production-linux.json](onlyoffice/local-production-linux.json)
+  pide reducir la retención a **600 s** y la limpieza a **cada 5 minutos**. Se monta como capa de configuración de
+  node-config (los servicios corren con `NODE_ENV=production-linux` y `NODE_CONFIG_DIR=/etc/onlyoffice/documentserver`).
 
-> ⚠️ **Pendiente de verificar con Docker:** que el contenedor 10.0.0 cargue `local-production-linux.json`, y qué
-> rutas exactas usa `/converter/from-file` para los temporales. Para comprobarlo tras una conversión:
->
-> ```bash
-> docker compose exec onlyoffice sh -c 'find /var/lib/onlyoffice/documentserver/App_Data/cache/files -type f -mmin -15 | head'
-> docker compose exec onlyoffice sh -c 'cat /etc/onlyoffice/documentserver/local-production-linux.json'
-> ```
->
-> Si no se aplica, use el mecanismo que indique la documentación de su versión, o la alternativa `tmpfs` comentada en
-> `docker-compose.yml`, que mantiene la caché en RAM y la borra al reiniciar (también pendiente de verificar).
+**Verificado el 2026-11-17 con la imagen 10.0.0:**
+
+- Cada conversión por `/converter/from-file` deja **`origin.docx` (el Word recibido) y `output.pdf`** en
+  `cache/files/data/conv_<id>/`.
+- **La retención de 600 s no es fiable.** Una conversión seguía en disco 23 minutos después; otras se borraron en
+  unos 20 minutos. No hay que depender de esta configuración para la confidencialidad.
+- El conversor `x2t` crea temporales en `/tmp` del contenedor y los borra al terminar; no quedaron restos.
+
+**Por eso `docker-compose.yml` monta la caché como `tmpfs`** (1 GB en RAM):
+
+- Las copias **nunca se escriben en disco** y desaparecen al reiniciar o recrear el contenedor (comprobado:
+  0 archivos tras `docker compose restart onlyoffice`).
+- Mientras el contenedor está en marcha, las copias pueden seguir en RAM. Para vaciarlas en cualquier momento:
+  `docker compose exec onlyoffice sh -c 'rm -rf /var/lib/onlyoffice/documentserver/App_Data/cache/files/data/conv_*'`.
+- El `tmpfs` cuenta para el límite de memoria de ONLYOFFICE (`ONLYOFFICE_MEMORY`, 4 GB por defecto).
+
+Para inspeccionar la caché:
+
+```bash
+docker compose exec onlyoffice sh -c 'find /var/lib/onlyoffice/documentserver/App_Data/cache/files -type f'
+```
 
 Para eliminar todos los datos residuales: `docker compose down -v` (borra los volúmenes).
 
@@ -482,9 +497,11 @@ Basadas en la [documentación oficial de `/converter/from-file`](https://api.onl
 - Conversión síncrona (sin `async`), con timeout del lado del cliente.
 - Desde 10.0, JWT viene activado por defecto en ONLYOFFICE.
 
-> **Pendiente de confirmar en ejecución real:** qué transporte JWT (`FORM_PART` o `HEADER`) acepta exactamente el
-> servidor 10.0.0. La prueba `RealOnlyOfficeConversionIT` lo valida. Si `FORM_PART` fallara con -7 o -8, cambie
-> `ONLYOFFICE_JWT_TRANSPORT=HEADER` y documente el resultado aquí.
+> **Verificado el 2026-11-17 contra `onlyoffice/documentserver:10.0.0`:** el transporte por defecto `FORM_PART`
+> (JWT en la parte multipart `token`) funciona tanto en `RealOnlyOfficeConversionIT` (ONLYOFFICE con
+> `JWT_ENABLED=true` y el resto de opciones por defecto) como en Docker Compose (`JWT_HEADER=Authorization`,
+> `JWT_IN_BODY=false`). ONLYOFFICE devolvió el PDF binario directamente en la respuesta, y un token firmado con
+> otro secreto se rechaza con `{"error":-8}`. El transporte `HEADER` no se ha probado contra el servidor real.
 
 ---
 
@@ -492,21 +509,21 @@ Basadas en la [documentación oficial de `/converter/from-file`](https://api.onl
 
 | Verificación | Estado |
 |---|---|
-| Compilación (`mvnw package`) con JDK 21.0.13 | ✅ Ejecutada |
-| 112 pruebas unitarias e integración de API con ONLYOFFICE simulado | ✅ Ejecutadas: 0 fallos |
+Última verificación: 2026-11-17, Windows 11, JDK 21.0.10, Docker Engine 29.9.2.
+
+| Verificación | Estado |
+|---|---|
+| 113 pruebas unitarias e integración de API con ONLYOFFICE simulado (`mvnw verify`) | ✅ 0 fallos |
 | Arranque del JAR: fallo controlado sin secreto, liveness 200, readiness 503 sin motor, 401 sin API key, 422 DOCX corrupto, 503 motor caído, `/inspect` | ✅ Ejecutado manualmente |
 | CLI `PdfComparisonTool` mediante `PropertiesLauncher` | ✅ Ejecutada |
-| `RealOnlyOfficeConversionIT` (Testcontainers + ONLYOFFICE 10.0.0) | ⏳ **Pendiente**: Docker no estaba disponible en el entorno de desarrollo |
-| `scripts/e2e.*` con Docker Compose | ⏳ **Pendiente** (requiere Docker) |
-| Construcción de la imagen `Dockerfile` | ⏳ **Pendiente** (requiere Docker) |
-| Retención de caché (`local-production-linux.json`) y opción tmpfs | ⏳ **Pendiente** (requiere Docker) |
-
-Pasos para cerrar lo pendiente en una máquina con Docker:
-
-```bash
-./scripts/generate-env.sh          # o scripts\generate-env.ps1
-./mvnw -Pintegration verify        # integración real con Testcontainers
-./scripts/e2e.sh                   # compose completo + conversión del contrato de ejemplo
-```
+| `RealOnlyOfficeConversionIT` (Testcontainers + ONLYOFFICE 10.0.0), 6 pruebas | ✅ 0 fallos, transporte JWT `FORM_PART` |
+| Construcción de la imagen `Dockerfile` | ✅ |
+| `scripts/e2e.ps1` con Docker Compose (contenedor `read_only`, usuario `app`, `cap_drop: ALL`) | ✅ Contrato de ejemplo de 4 páginas en unos 1,3 s |
+| Logs sin nombres de archivo ni contenido | ✅ Revisado tras el e2e |
+| Retención de caché con `local-production-linux.json` | ❌ No fiable; se sustituye por `tmpfs` |
+| Caché en `tmpfs` | ✅ Se vacía al reiniciar; e2e correcto con `tmpfs` activo |
+| Fuentes montadas en `fonts/` | ✅ Fuente de prueba registrada tras reiniciar e incrustada en el PDF |
+| Fidelidad frente a Word con 1 documento real (pagaré, 4 páginas) | ✅ 4 = 4 páginas, 149 de 151 líneas en su sitio (desplazamiento máximo 0,1 pt), 1 diferencia de salto de línea |
+| Fidelidad con una muestra amplia de contratos reales | ⏳ Pendiente: probar 5-10 contratos variados (tablas, Aptos, etc.) |
 
 Licenciamiento: ver [LICENSING.md](LICENSING.md).

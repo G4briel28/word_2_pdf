@@ -31,9 +31,12 @@ services:
       - ${FONTS_DIR:-./fonts}:/usr/share/fonts/truetype/custom:ro
       # Retención corta de la caché de archivos (ver README, sección "Almacenamiento temporal en ONLYOFFICE").
       - ./onlyoffice/local-production-linux.json:/etc/onlyoffice/documentserver/local-production-linux.json:ro
-    # Opción de mayor confidencialidad (NO verificada aún en este proyecto): caché de archivos en RAM.
-    # tmpfs:
-    #   - /var/lib/onlyoffice/documentserver/App_Data/cache/files:size=1g,mode=1777
+    # Caché de conversiones en RAM: ONLYOFFICE guarda ahí origin.docx y output.pdf de cada conversión, y la
+    # retención de local-production-linux.json NO se aplicó de forma fiable a /converter/from-file (verificado
+    # 2026-11-17). Con tmpfs nunca llegan al disco y se pierden al reiniciar el contenedor. Cuenta para el límite
+    # de memoria del servicio. Ver README, sección "Almacenamiento temporal en ONLYOFFICE".
+    tmpfs:
+      - /var/lib/onlyoffice/documentserver/App_Data/cache/files:size=1g,mode=1777
     networks:
       - backend
     healthcheck:

@@ -59,7 +59,9 @@ public final class FakeOnlyOfficeServer implements AutoCloseable {
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final String secret;
     private volatile Behavior behavior = Behavior.pdf(1);
-    private final AtomicInteger current = new AtomicInteger();
+    // Se reemplaza en reset(): las peticiones rezagadas de una prueba anterior (p. ej. un timeout cuyo hilo sigue
+    // durmiendo) decrementan su propio contador y no contaminan la medición de la prueba siguiente.
+    private volatile AtomicInteger current = new AtomicInteger();
     private final AtomicInteger maxConcurrent = new AtomicInteger();
     private final AtomicInteger requests = new AtomicInteger();
     private final List<String> violations = new CopyOnWriteArrayList<>();
@@ -89,6 +91,7 @@ public final class FakeOnlyOfficeServer implements AutoCloseable {
 
     public void reset() {
         behavior = Behavior.pdf(1);
+        current = new AtomicInteger();
         maxConcurrent.set(0);
         requests.set(0);
         violations.clear();
@@ -118,8 +121,10 @@ public final class FakeOnlyOfficeServer implements AutoCloseable {
 
     private void convert(HttpExchange ex) throws IOException {
         requests.incrementAndGet();
-        int now = current.incrementAndGet();
+        AtomicInteger counter = current;
+        int now = counter.incrementAndGet();
         maxConcurrent.accumulateAndGet(now, Math::max);
+        boolean counted = true;
         try {
             if (!"POST".equals(ex.getRequestMethod())) {
                 respond(ex, 405, "text/plain", new byte[0]);
@@ -148,6 +153,11 @@ public final class FakeOnlyOfficeServer implements AutoCloseable {
                     return;
                 }
             }
+            // Fin del "procesamiento": se descuenta ANTES de responder. Si se hiciera después, el cliente podría
+            // recibir la respuesta, liberar su cupo y enviar la siguiente petición antes del decremento, y se
+            // mediría una concurrencia que no existió.
+            counter.decrementAndGet();
+            counted = false;
             switch (b.mode()) {
                 case PDF -> {
                     ex.getResponseHeaders().add("Content-Disposition", "attachment; filename=\"document.pdf\"");
@@ -163,7 +173,9 @@ public final class FakeOnlyOfficeServer implements AutoCloseable {
         } catch (IOException e) {
             // cliente desconectado (p.ej. timeout del lado del servicio)
         } finally {
-            current.decrementAndGet();
+            if (counted) {
+                counter.decrementAndGet();
+            }
             ex.close();
         }
     }
