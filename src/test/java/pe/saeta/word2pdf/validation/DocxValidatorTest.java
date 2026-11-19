@@ -39,7 +39,8 @@ class DocxValidatorTest {
         DocxValidator small = new DocxValidator(new pe.saeta.word2pdf.config.ConversionProperties(
                 DataSize.ofBytes(100), DataSize.ofMegabytes(1), 1, java.time.Duration.ofSeconds(1),
                 new pe.saeta.word2pdf.config.ConversionProperties.Docx(10, DataSize.ofMegabytes(1), 100),
-                new pe.saeta.word2pdf.config.ConversionProperties.Fidelity(false, 2, false, false)));
+                new pe.saeta.word2pdf.config.ConversionProperties.Fidelity(false, 2, false, false),
+                new pe.saeta.word2pdf.config.ConversionProperties.Compat(true)));
         assertThatThrownBy(() -> small.validate(SampleDocxGenerator.minimal()))
                 .isInstanceOfSatisfying(ConversionException.class,
                         e -> assertThat(e.errorCode()).isEqualTo(ErrorCode.DOCUMENT_TOO_LARGE));

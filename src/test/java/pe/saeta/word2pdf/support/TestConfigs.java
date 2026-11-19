@@ -24,19 +24,29 @@ public final class TestConfigs {
     public static ConversionProperties conversion(int maxConcurrent, Duration queueTimeout) {
         return new ConversionProperties(DataSize.ofMegabytes(20), DataSize.ofMegabytes(200), maxConcurrent, queueTimeout,
                 new ConversionProperties.Docx(5000, DataSize.ofMegabytes(300), 200),
-                new ConversionProperties.Fidelity(true, 2.0, false, false));
+                new ConversionProperties.Fidelity(true, 2.0, false, false),
+                new ConversionProperties.Compat(true));
     }
 
     public static ConversionProperties conversionWithDocxLimits(int maxEntries, DataSize maxUncompressed, int maxRatio) {
         return new ConversionProperties(DataSize.ofMegabytes(20), DataSize.ofMegabytes(200), 4, Duration.ofSeconds(5),
                 new ConversionProperties.Docx(maxEntries, maxUncompressed, maxRatio),
-                new ConversionProperties.Fidelity(true, 2.0, false, false));
+                new ConversionProperties.Fidelity(true, 2.0, false, false),
+                new ConversionProperties.Compat(true));
     }
 
     public static ConversionProperties conversionWithFidelity(boolean failOnPageSize, boolean failOnFonts) {
         return new ConversionProperties(DataSize.ofMegabytes(20), DataSize.ofMegabytes(200), 4, Duration.ofSeconds(5),
                 new ConversionProperties.Docx(5000, DataSize.ofMegabytes(300), 200),
-                new ConversionProperties.Fidelity(true, 2.0, failOnPageSize, failOnFonts));
+                new ConversionProperties.Fidelity(true, 2.0, failOnPageSize, failOnFonts),
+                new ConversionProperties.Compat(true));
+    }
+
+    public static ConversionProperties conversionWithHyphenationCompat(boolean alignWithWord) {
+        return new ConversionProperties(DataSize.ofMegabytes(20), DataSize.ofMegabytes(200), 4, Duration.ofSeconds(5),
+                new ConversionProperties.Docx(5000, DataSize.ofMegabytes(300), 200),
+                new ConversionProperties.Fidelity(true, 2.0, false, false),
+                new ConversionProperties.Compat(alignWithWord));
     }
 
     public static OnlyOfficeProperties onlyOffice(String baseUrl, Duration conversionTimeout,

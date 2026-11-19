@@ -114,6 +114,7 @@ O copie `.env.example` a `.env` y complete los valores a mano:
 | `ONLYOFFICE_CONVERSION_TIMEOUT` | Tiempo máximo de una conversión (por defecto `120s`) |
 | `APP_FIDELITY_FAIL_ON_FONTS` | `true` = responder 422 si se sospecha sustitución de fuentes |
 | `APP_FIDELITY_FAIL_ON_PAGE_SIZE` | `true` = responder 422 si el tamaño de página no coincide |
+| `APP_COMPAT_ALIGN_HYPHENATION` | `true` (por defecto) = aplicar el ajuste de división de palabras descrito en [Fidelidad documental](#fidelidad-documental); `false` = enviar siempre el DOCX tal cual |
 | `FONTS_DIR` | Directorio de fuentes adicionales (por defecto `./fonts`) |
 
 El secreto JWT y las API keys solo se leen de variables de entorno; no hay valores por defecto en el código.
@@ -235,7 +236,7 @@ Content-Disposition: attachment; filename="contrato-ejemplo.pdf"
 Cache-Control: no-store
 X-Request-Id: 3f0c...                     ← identificador para correlacionar logs
 X-Pdf-Page-Count: 4
-X-Conversion-Warnings: FONT_SUBSTITUTION_SUSPECTED          (solo si hay avisos)
+X-Conversion-Warnings: FONT_SUBSTITUTION_SUSPECTED,HYPHENATION_ADJUSTED   (solo si hay avisos)
 X-Font-Substitution-Suspected: Calibri                       (solo si hay avisos)
 <bytes del PDF>
 ```
@@ -259,7 +260,7 @@ También puede ejecutar el flujo completo automatizado: `scripts\e2e.ps1` o `./s
 ./mvnw verify                 # Windows: .\mvnw.cmd verify
 ```
 
-Ejecuta **113 pruebas** sin Docker (unitarias y de integración de la API con un ONLYOFFICE **simulado**):
+Ejecuta **127 pruebas** sin Docker (unitarias y de integración de la API con un ONLYOFFICE **simulado**):
 
 | Requisito | Pruebas |
 |---|---|
@@ -273,6 +274,7 @@ Ejecuta **113 pruebas** sin Docker (unitarias y de integración de la API con un
 | 8. Validación de PDF | `PdfValidatorTest`, `invalidPdfFromEngineIsRejected` |
 | 9. Conversiones consecutivas | `consecutiveConversionsDoNotDegrade` (25 seguidas) |
 | 10. Conversiones simultáneas | `ConcurrentConversionApiTest`, `OverloadApiTest`, `ConversionLimiterTest` |
+| 11. División de palabras igual que Word | `HyphenationCompatibilityTest`, `sendsHyphenationAdjustedCopyWhenWordWouldNotHyphenate`, `hyphenationAdjustmentIsReportedInHeaders` |
 
 El simulador (`FakeOnlyOfficeServer`) verifica el contrato documentado de `/converter/from-file`: solo partes
 `file`/`params`/`token`, JWT HS256 válido con `operation=converter` y sin `url`.
@@ -285,7 +287,8 @@ El simulador (`FakeOnlyOfficeServer`) verifica el contrato documentado de `/conv
 
 `RealOnlyOfficeConversionIT` levanta `onlyoffice/documentserver:10.0.0` con Testcontainers, convierte los contratos de
 ejemplo, valida los PDF y los tamaños de página (A4 vertical y Carta horizontal), y prueba conversiones consecutivas,
-paralelas y con un secreto incorrecto. Los PDF quedan en `target/it-output/` para revisarlos a ojo. Sin Docker, estas
+paralelas y con un secreto incorrecto. También comprueba que ONLYOFFICE sigue partiendo palabras cuando Word no lo
+haría, y que el ajuste de división lo evita. Los PDF quedan en `target/it-output/` para revisarlos a ojo. Sin Docker, estas
 pruebas se omiten automáticamente.
 
 **E2E con Docker Compose:** `scripts\e2e.ps1` / `./scripts/e2e.sh`.
@@ -366,9 +369,20 @@ nombres de fuentes. **Nunca** incluyen contenido del documento ni nombres de arc
 
 ### Medidas implementadas
 
-1. **El documento no se modifica.** Los bytes recibidos se envían a ONLYOFFICE tal cual: sin Apache POI, sin HTML
-   intermedio y sin LibreOffice. No se fija ningún parámetro de maquetación en la conversión, de modo que papel,
-   márgenes, orientación, interlineado y estilos salen del propio DOCX.
+1. **El documento no se modifica**, con una única excepción descrita en el punto siguiente. Los bytes recibidos se
+   envían a ONLYOFFICE tal cual: sin Apache POI, sin HTML intermedio y sin LibreOffice. No se fija ningún parámetro de
+   maquetación en la conversión, de modo que papel, márgenes, orientación, interlineado y estilos salen del propio DOCX.
+   **Excepción: división automática de palabras.** Algunas plantillas activan la división automática
+   (`<w:autoHyphenation/>` en `settings.xml`) pero, en los valores por defecto de párrafo de `styles.xml`
+   (`<w:pPrDefault>`), declaran "No dividir con guiones" (`<w:suppressAutoHyphens/>`). Word respeta lo segundo y no
+   parte ninguna palabra. ONLYOFFICE 10.0.0 ignora ese valor por defecto y sí las parte, y eso cambia saltos de línea
+   y páginas. Solo en ese caso, y si ningún estilo ni párrafo vuelve a permitir la división, el servicio envía a
+   ONLYOFFICE una **copia en memoria** sin `<w:autoHyphenation/>`. En Word el documento se ve igual, porque Word ya no
+   dividía. Las demás partes del paquete se copian sin cambios, no se guarda nada en disco y la respuesta lo indica
+   con `X-Conversion-Warnings: HYPHENATION_ADJUSTED`. Ante cualquier duda o error se envía el original. Se desactiva
+   con `APP_COMPAT_ALIGN_HYPHENATION=false`. Con 7 plantillas reales de contratos (y Arial Nova instalada), el número
+   de páginas pasó a coincidir con Word en las 7. En 6 de ellas, entre el 96 % y el 100 % de las líneas quedaron en
+   el mismo sitio; en un anexo, el 73 %.
 2. **Control de tamaño y orientación de página.** Se leen los `w:sectPr/w:pgSz` de todas las secciones y cada página
    del PDF debe coincidir con alguna, con una tolerancia de 2 pt. Si no coincide → aviso `PAGE_SIZE_MISMATCH`
    (o 422 en modo estricto).
@@ -403,6 +417,12 @@ Código de salida: `0` sin diferencias relevantes, `1` con diferencias y `2` por
   flotantes. Valide con la herramienta de comparación una muestra representativa de **sus** plantillas antes de pasar
   a producción.
 - El render de la herramienta de QA usa PDFBox: en algunos casos puede diferir del renderizado de Acrobat.
+- División de palabras: ONLYOFFICE toma el idioma de cada texto del propio DOCX (`w:lang`), pero en español solo
+  divide palabras si ese idioma es `es-ES`. La lista de idiomas con división está fija en su código JavaScript
+  (`spellcheckGetLanguages`, 34 idiomas), y en ella no figuran `es-PE` ni otras variantes latinoamericanas. No se
+  puede configurar: probado el 2026-11-18, ni ampliar `dictionaries/es_ES/es_ES.json` ni añadir una carpeta `es_PE`
+  con el diccionario tiene efecto. Un documento con la división automática realmente activa y texto en `es-PE`
+  saldrá sin palabras partidas. Ese caso no se corrige, porque exigiría modificar ONLYOFFICE o el idioma del DOCX.
 
 ---
 
@@ -507,16 +527,14 @@ Basadas en la [documentación oficial de `/converter/from-file`](https://api.onl
 
 ## Estado de verificación
 
-| Verificación | Estado |
-|---|---|
-Última verificación: 2026-11-17, Windows 11, JDK 21.0.10, Docker Engine 29.9.2.
+Última verificación: 2026-11-18, Windows 11, JDK 21.0.10, Docker Engine 29.9.2.
 
 | Verificación | Estado |
 |---|---|
-| 113 pruebas unitarias e integración de API con ONLYOFFICE simulado (`mvnw verify`) | ✅ 0 fallos |
+| 127 pruebas unitarias e integración de API con ONLYOFFICE simulado (`mvnw verify`) | ✅ 0 fallos |
 | Arranque del JAR: fallo controlado sin secreto, liveness 200, readiness 503 sin motor, 401 sin API key, 422 DOCX corrupto, 503 motor caído, `/inspect` | ✅ Ejecutado manualmente |
 | CLI `PdfComparisonTool` mediante `PropertiesLauncher` | ✅ Ejecutada |
-| `RealOnlyOfficeConversionIT` (Testcontainers + ONLYOFFICE 10.0.0), 6 pruebas | ✅ 0 fallos, transporte JWT `FORM_PART` |
+| `RealOnlyOfficeConversionIT` (Testcontainers + ONLYOFFICE 10.0.0), 7 pruebas | ✅ 0 fallos, transporte JWT `FORM_PART` |
 | Construcción de la imagen `Dockerfile` | ✅ |
 | `scripts/e2e.ps1` con Docker Compose (contenedor `read_only`, usuario `app`, `cap_drop: ALL`) | ✅ Contrato de ejemplo de 4 páginas en unos 1,3 s |
 | Logs sin nombres de archivo ni contenido | ✅ Revisado tras el e2e |
@@ -524,6 +542,9 @@ Basadas en la [documentación oficial de `/converter/from-file`](https://api.onl
 | Caché en `tmpfs` | ✅ Se vacía al reiniciar; e2e correcto con `tmpfs` activo |
 | Fuentes montadas en `fonts/` | ✅ Fuente de prueba registrada tras reiniciar e incrustada en el PDF |
 | Fidelidad frente a Word con 1 documento real (pagaré, 4 páginas) | ✅ 4 = 4 páginas, 149 de 151 líneas en su sitio (desplazamiento máximo 0,1 pt), 1 diferencia de salto de línea |
-| Fidelidad con una muestra amplia de contratos reales | ⏳ Pendiente: probar 5-10 contratos variados (tablas, Aptos, etc.) |
+| Ajuste de división de palabras con 7 plantillas reales de contratos (servicio en Compose) | ✅ 0 palabras partidas, igual que Word (antes, entre 10 y 220 por documento). El pagaré, sin división activada, no se ajusta |
+| Fidelidad con 7 plantillas reales de contratos, con ajuste y Arial Nova (prueba local con la fuente de Office) | ✅ Mismo número de páginas en las 7 y ninguna línea en otra página. Anexos: 100 % de líneas en su sitio (desplazamiento máximo 0,1 pt), salvo un anexo con el 73 % (máximo 14 pt). Contratos: del 96 % al 97 % de líneas en su sitio |
+| Fidelidad sin Arial Nova | ❌ Arial la sustituye; los contratos pierden una página. Requiere licencia de Arial Nova para servidor |
+| Arial Nova 1.05 en `fonts/` (copia de Microsoft, solo para pruebas locales) | ✅ Mismas métricas que la de Word; mismos resultados que en la fila de fidelidad con Arial Nova. Diferencias restantes: ajuste automático de columnas en una tabla de firmas y desplazamientos horizontales menores |
 
 Licenciamiento: ver [LICENSING.md](LICENSING.md).

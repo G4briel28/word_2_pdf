@@ -15,9 +15,21 @@ public record FidelityReport(List<String> warnings, Set<String> suspectedMissing
 
     public static final String PAGE_SIZE_MISMATCH = "PAGE_SIZE_MISMATCH";
     public static final String FONT_SUBSTITUTION_SUSPECTED = "FONT_SUBSTITUTION_SUSPECTED";
+    /** Se convirtió una copia en memoria sin división automática de palabras, para igualar a Word. */
+    public static final String HYPHENATION_ADJUSTED = "HYPHENATION_ADJUSTED";
 
     public static FidelityReport empty() {
         return new FidelityReport(List.of(), Set.of(), List.of());
+    }
+
+    /** Copia del informe con un aviso más (si no estaba ya). */
+    public FidelityReport withWarning(String code) {
+        if (warnings.contains(code)) {
+            return this;
+        }
+        List<String> all = new java.util.ArrayList<>(warnings);
+        all.add(code);
+        return new FidelityReport(List.copyOf(all), suspectedMissingFonts, pageSizeIssues);
     }
 
     public boolean hasWarning(String code) {

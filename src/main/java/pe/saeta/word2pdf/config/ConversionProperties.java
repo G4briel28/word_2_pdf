@@ -20,6 +20,7 @@ import org.springframework.validation.annotation.Validated;
  * @param queueTimeout  espera máxima por un cupo de conversión antes de responder 503
  * @param docx          límites anti zip-bomb para el contenedor OOXML
  * @param fidelity      controles de fidelidad post-conversión
+ * @param compat        ajustes de compatibilidad Word ↔ ONLYOFFICE
  */
 @Validated
 @ConfigurationProperties("app.conversion")
@@ -29,7 +30,8 @@ public record ConversionProperties(
         @Min(1) int maxConcurrent,
         @NotNull Duration queueTimeout,
         @NotNull @Valid Docx docx,
-        @NotNull @Valid Fidelity fidelity) {
+        @NotNull @Valid Fidelity fidelity,
+        @NotNull @Valid Compat compat) {
 
     /**
      * @param maxEntries          número máximo de entradas en el ZIP
@@ -47,5 +49,13 @@ public record ConversionProperties(
      */
     public record Fidelity(boolean enabled, @Positive double pageSizeTolerancePoints,
                            boolean failOnPageSizeMismatch, boolean failOnFontSubstitution) {
+    }
+
+    /**
+     * @param alignHyphenationWithWord si es true y el DOCX activa la división automática de palabras pero sus
+     *                                 estilos por defecto la suprimen, se envía a ONLYOFFICE una copia en memoria
+     *                                 sin la división activada (ver {@code HyphenationCompatibility})
+     */
+    public record Compat(boolean alignHyphenationWithWord) {
     }
 }

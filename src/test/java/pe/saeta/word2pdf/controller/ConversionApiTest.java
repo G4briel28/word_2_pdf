@@ -82,6 +82,23 @@ class ConversionApiTest extends ApiTestSupport {
     }
 
     @Test
+    void hyphenationAdjustmentIsReportedInHeaders() throws Exception {
+        FAKE.setBehavior(Behavior.pdf(2));
+        byte[] docx = SampleDocxGenerator.hyphenationContract(SampleDocxGenerator.Hyphenation.ON_SUPPRESSED_BY_DEFAULT);
+
+        HttpResponse<byte[]> response = postBinary(docx);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.headers().firstValue(ConversionController.HEADER_WARNINGS)).get().asString()
+                .contains(FidelityReport.HYPHENATION_ADJUSTED);
+        assertThat(FAKE.receivedFiles()).singleElement().satisfies(sent -> {
+            assertThat(sent).isNotEqualTo(docx);
+            assertThat(new String(SampleDocxGenerator.unzip(sent).get("word/settings.xml"), StandardCharsets.UTF_8))
+                    .doesNotContain("autoHyphenation");
+        });
+    }
+
+    @Test
     void inspectEndpointReportsSectionsAndFonts() throws Exception {
         HttpResponse<byte[]> response = postBinary("/api/v1/conversion/docx/inspect", SampleDocxGenerator.fullContract(), API_KEY);
         assertThat(response.statusCode()).isEqualTo(200);

@@ -68,6 +68,7 @@ services:
       APP_QUEUE_TIMEOUT: ${APP_QUEUE_TIMEOUT:-30s}
       APP_FIDELITY_FAIL_ON_FONTS: ${APP_FIDELITY_FAIL_ON_FONTS:-false}
       APP_FIDELITY_FAIL_ON_PAGE_SIZE: ${APP_FIDELITY_FAIL_ON_PAGE_SIZE:-false}
+      APP_COMPAT_ALIGN_HYPHENATION: ${APP_COMPAT_ALIGN_HYPHENATION:-true}
       # Logs JSON (Elastic Common Schema) para producción.
       LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
       JAVA_OPTS: "-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError -Djava.awt.headless=true -Djava.io.tmpdir=/tmp"

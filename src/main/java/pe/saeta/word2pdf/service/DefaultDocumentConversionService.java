@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import pe.saeta.word2pdf.compat.HyphenationCompatibility;
 import pe.saeta.word2pdf.config.ConversionProperties;
 import pe.saeta.word2pdf.exception.ConversionException;
 import pe.saeta.word2pdf.exception.ErrorCode;
@@ -22,7 +23,8 @@ import pe.saeta.word2pdf.validation.PdfInfo;
 import pe.saeta.word2pdf.validation.PdfValidator;
 
 /**
- * Orquesta la conversión: validar DOCX → obtener cupo → convertir con el motor → validar PDF →
+ * Orquesta la conversión: validar DOCX → ajuste de compatibilidad (solo división de palabras, ver
+ * {@link HyphenationCompatibility}) → obtener cupo → convertir con el motor → validar PDF →
  * controles de fidelidad → métricas. Todo en memoria; no se escribe ningún archivo en disco.
  * Los logs solo contienen tamaños, duración, páginas y códigos (nunca contenido ni nombres de archivo).
  */
@@ -37,6 +39,7 @@ public class DefaultDocumentConversionService implements DocumentConversionServi
     private final ConversionLimiter limiter;
     private final DocxLayoutInspector layoutInspector;
     private final FidelityChecker fidelityChecker;
+    private final HyphenationCompatibility hyphenationCompatibility;
     private final boolean fidelityEnabled;
     private final MeterRegistry registry;
     private final DistributionSummary inputSize;
@@ -44,6 +47,7 @@ public class DefaultDocumentConversionService implements DocumentConversionServi
     public DefaultDocumentConversionService(DocxValidator docxValidator, PdfValidator pdfValidator,
                                             ConversionEngine engine, ConversionLimiter limiter,
                                             DocxLayoutInspector layoutInspector, FidelityChecker fidelityChecker,
+                                            HyphenationCompatibility hyphenationCompatibility,
                                             ConversionProperties properties, MeterRegistry registry) {
         this.docxValidator = docxValidator;
         this.pdfValidator = pdfValidator;
@@ -51,6 +55,7 @@ public class DefaultDocumentConversionService implements DocumentConversionServi
         this.limiter = limiter;
         this.layoutInspector = layoutInspector;
         this.fidelityChecker = fidelityChecker;
+        this.hyphenationCompatibility = hyphenationCompatibility;
         this.fidelityEnabled = properties.fidelity().enabled();
         this.registry = registry;
         this.inputSize = DistributionSummary.builder("docconv.input.size").baseUnit("bytes")
@@ -70,11 +75,17 @@ public class DefaultDocumentConversionService implements DocumentConversionServi
             docxValidator.validate(docxBytes);
             inputSize.record(docxBytes.length);
             DocxLayout layout = fidelityEnabled ? layoutInspector.inspect(docxBytes) : null;
+            HyphenationCompatibility.Result compat = hyphenationCompatibility.apply(docxBytes);
+            byte[] engineInput = compat.docx();
 
-            byte[] pdf = limiter.execute(() -> engine.convertDocxToPdf(docxBytes));
+            byte[] pdf = limiter.execute(() -> engine.convertDocxToPdf(engineInput));
 
             PdfInfo info = pdfValidator.validate(pdf);
             FidelityReport report = layout != null ? fidelityChecker.check(layout, info) : FidelityReport.empty();
+            if (compat.adjusted()) {
+                registry.counter("docconv.compat.adjustments", "type", "hyphenation").increment();
+                report = report.withWarning(FidelityReport.HYPHENATION_ADJUSTED);
+            }
             if (!report.warnings().isEmpty()) {
                 log.warn("Avisos de fidelidad warnings={} fuentesSospechosas={} paginas={}",
                         report.warnings(), report.suspectedMissingFonts(), report.pageSizeIssues());

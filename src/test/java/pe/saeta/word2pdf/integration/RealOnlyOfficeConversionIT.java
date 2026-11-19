@@ -16,7 +16,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +35,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import pe.saeta.word2pdf.exception.ConversionException;
 import pe.saeta.word2pdf.fidelity.FidelityReport;
+import pe.saeta.word2pdf.service.ConversionEngine;
 import pe.saeta.word2pdf.service.ConversionResult;
 import pe.saeta.word2pdf.service.DocumentConversionService;
 import pe.saeta.word2pdf.support.SampleDocxGenerator;
@@ -75,6 +80,9 @@ class RealOnlyOfficeConversionIT {
     @Autowired
     PdfValidator pdfValidator;
 
+    @Autowired
+    ConversionEngine engine;
+
     @BeforeAll
     static void prepareOutput() throws Exception {
         Files.createDirectories(OUTPUT);
@@ -104,6 +112,41 @@ class RealOnlyOfficeConversionIT {
         assertThat(result.fidelity().warnings()).doesNotContain(FidelityReport.PAGE_SIZE_MISMATCH);
         System.out.println("Avisos de fidelidad (informativo): " + result.fidelity());
     }
+
+    @Test
+    void hyphenationMatchesWordWhenStyleDefaultsSuppressIt() throws Exception {
+        byte[] docx = SampleDocxGenerator.hyphenationContract(SampleDocxGenerator.Hyphenation.ON_SUPPRESSED_BY_DEFAULT);
+
+        // Sin el ajuste, ONLYOFFICE 10 divide palabras aunque Word no lo haría. Si esto deja de cumplirse
+        // (p. ej. una versión nueva de ONLYOFFICE lo corrige), el ajuste podría retirarse.
+        byte[] raw = engine.convertDocxToPdf(docx);
+        Files.write(OUTPUT.resolve("division-palabras-sin-ajuste.pdf"), raw);
+        assertThat(hyphenatedLineBreaks(raw)).as("el documento de prueba debe provocar división en ONLYOFFICE")
+                .isPositive();
+
+        ConversionResult result = service.convert(docx);
+        Files.write(OUTPUT.resolve("division-palabras-con-ajuste.pdf"), result.pdf());
+        assertThat(result.fidelity().warnings()).contains(FidelityReport.HYPHENATION_ADJUSTED);
+        assertThat(hyphenatedLineBreaks(result.pdf())).isZero();
+    }
+
+    /** Líneas que terminan en letra + guion y continúan en minúscula: palabras partidas al final de línea. */
+    private static long hyphenatedLineBreaks(byte[] pdf) throws Exception {
+        try (PDDocument doc = Loader.loadPDF(pdf)) {
+            List<String> lines = new PDFTextStripper().getText(doc).lines()
+                    .map(String::strip).filter(l -> !l.isEmpty()).toList();
+            long count = 0;
+            for (int i = 0; i + 1 < lines.size(); i++) {
+                if (HYPHEN_END.matcher(lines.get(i)).find() && LOWER_START.matcher(lines.get(i + 1)).find()) {
+                    count++;
+                }
+            }
+            return count;
+        }
+    }
+
+    private static final Pattern HYPHEN_END = Pattern.compile("\\p{Ll}[-\\u00AD\\u2010\\u2011]$");
+    private static final Pattern LOWER_START = Pattern.compile("^\\p{Ll}");
 
     @Test
     void consecutiveConversions() {

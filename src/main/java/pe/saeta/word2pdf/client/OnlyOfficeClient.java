@@ -32,7 +32,8 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Cliente de la Conversion API de ONLYOFFICE Docs 10.x, endpoint {@code POST /converter/from-file}.
  * <p>
- * El DOCX viaja en la parte multipart {@code file} tal cual se recibió (sin modificar). Los parámetros
+ * El DOCX viaja en la parte multipart {@code file} tal como se lo entrega el servicio (ver
+ * {@link pe.saeta.word2pdf.compat.HyphenationCompatibility}); este cliente no lo modifica. Los parámetros
  * de conversión van firmados en un JWT con {@code operation=converter} y sin {@code url}, como exige 10.0.
  * La conversión es síncrona: ONLYOFFICE responde con el binario convertido o con JSON {@code {"error": n}}.
  */

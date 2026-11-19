@@ -97,6 +97,63 @@ public final class SampleDocxGenerator {
         return zip(parts);
     }
 
+    /** Cómo declara el DOCX la división automática de palabras (caso de las plantillas reales de contratos). */
+    public enum Hyphenation {
+        /** Sin {@code autoHyphenation}: nadie divide. */
+        OFF,
+        /** {@code autoHyphenation} activado y sin supresión: Word y ONLYOFFICE dividen. */
+        ON,
+        /** {@code autoHyphenation} activado, pero {@code pPrDefault} lo suprime: Word no divide; ONLYOFFICE 10 sí. */
+        ON_SUPPRESSED_BY_DEFAULT,
+        /** Como el anterior, pero el estilo Normal vuelve a permitir la división: Word sí divide. */
+        ON_SUPPRESSED_BY_DEFAULT_REENABLED_BY_STYLE,
+        /** Como {@link #ON_SUPPRESSED_BY_DEFAULT}, pero un párrafo vuelve a permitir la división. */
+        ON_SUPPRESSED_BY_DEFAULT_REENABLED_BY_PARAGRAPH
+    }
+
+    /** Contrato de dos páginas, justificado y en español, con la configuración de división indicada. */
+    public static byte[] hyphenationContract(Hyphenation mode) {
+        Map<String, byte[]> parts = unzip(contract(new Options(2, false, false, false, "Arial", "Arial")));
+        boolean auto = mode != Hyphenation.OFF;
+        parts.put("word/settings.xml", utf8(XML_DECL + "<w:settings " + NS + ">"
+                + (auto ? "<w:autoHyphenation/><w:hyphenationZone w:val=\"0\"/>" : "")
+                + "<w:defaultTabStop w:val=\"708\"/></w:settings>"));
+        parts.put("[Content_Types].xml", utf8(new String(parts.get("[Content_Types].xml"), StandardCharsets.UTF_8)
+                .replace("</Types>", "<Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\"/></Types>")));
+        parts.put("word/_rels/document.xml.rels", utf8(new String(parts.get("word/_rels/document.xml.rels"), StandardCharsets.UTF_8)
+                .replace("</Relationships>", "<Relationship Id=\"rIdSettings\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings\" Target=\"settings.xml\"/></Relationships>")));
+        // ONLYOFFICE 10 solo divide palabras en español con es-ES (no tiene diccionario de división para es-PE).
+        String styles = new String(parts.get("word/styles.xml"), StandardCharsets.UTF_8)
+                .replace("<w:lang w:val=\"es-PE\"/>", "<w:lang w:val=\"es-ES\"/>");
+        if (mode.name().startsWith("ON_SUPPRESSED")) {
+            styles = styles.replace("<w:pPrDefault><w:pPr>", "<w:pPrDefault><w:pPr><w:suppressAutoHyphens/>");
+        }
+        if (mode == Hyphenation.ON_SUPPRESSED_BY_DEFAULT_REENABLED_BY_STYLE) {
+            styles = styles.replace("<w:pPr><w:jc w:val=\"both\"/></w:pPr>",
+                    "<w:pPr><w:suppressAutoHyphens w:val=\"0\"/><w:jc w:val=\"both\"/></w:pPr>");
+        }
+        parts.put("word/styles.xml", utf8(styles));
+        if (mode == Hyphenation.ON_SUPPRESSED_BY_DEFAULT_REENABLED_BY_PARAGRAPH) {
+            String doc = new String(parts.get("word/document.xml"), StandardCharsets.UTF_8);
+            parts.put("word/document.xml", utf8(doc.replaceFirst("<w:p>",
+                    "<w:p><w:pPr><w:suppressAutoHyphens w:val=\"false\"/></w:pPr>")));
+        }
+        return zip(parts);
+    }
+
+    public static Map<String, byte[]> unzip(byte[] zipBytes) {
+        Map<String, byte[]> parts = new LinkedHashMap<>();
+        try (java.util.zip.ZipInputStream zis = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(zipBytes))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                parts.put(entry.getName(), zis.readAllBytes());
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return parts;
+    }
+
     public static byte[] zip(Map<String, byte[]> entries) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(out)) {
